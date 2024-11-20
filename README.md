@@ -37,6 +37,20 @@ Supervisor Telegram Notifier is an open-source project that integrates Superviso
     - `TELEGRAM_CHAT_ID`: The chat ID where the bot will send notifications.
     - `SERVER_URL`: The URL of your Supervisor XML-RPC interface.
 
+4. Enable Supervisor HTTP in its configuration file:
+    - Open the `supervisord.conf` file, usually located at `/etc/supervisor/supervisord.conf` or `/etc/supervisord.conf`.
+    - Add or uncomment the following `[inet_http_server]` section to enable the HTTP server:
+        ```ini
+        [inet_http_server]
+        port=127.0.0.1:9001
+        username=user  ; Optional: set a username for authentication
+        password=pass  ; Optional: set a password for authentication
+        ```
+    - Save the file and restart Supervisor to apply the changes:
+        ```sh
+        sudo supervisorctl reload
+        ```
+
 ## Usage
 
 1. Build and run the project:
