@@ -9,10 +9,12 @@ import (
 )
 
 var (
-	ServerURL        string
-	TelegramBotToken string
-	ProcessesPerPage int
-	TelegramChatID   int64
+	ServerURLs         string
+	TelegramBotToken   string
+	ProcessesPerPage   int
+	TelegramChatID     int64
+	SupervisorUsername string
+	SupervisorPassword string
 )
 
 func init() {
@@ -21,10 +23,12 @@ func init() {
 		log.Printf("Error loading .env file: %v", err)
 	}
 
-	ServerURL = getEnv("SERVER_URL", "")
+	ServerURLs = getEnv("SERVER_URLS", "")
 	TelegramBotToken = getEnv("TELEGRAM_BOT_TOKEN", "")
 	ProcessesPerPage = getEnvAsInt("PROCESSES_PER_PAGE", 5)
 	TelegramChatID = getEnvAsInt64("TELEGRAM_CHAT_ID", 0)
+	SupervisorUsername = getEnv("SUPERVISOR_USERNAME", "")
+	SupervisorPassword = getEnv("SUPERVISOR_PASSWORD", "")
 }
 
 func getEnv(key, defaultValue string) string {

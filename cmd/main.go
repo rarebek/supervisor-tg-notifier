@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -11,11 +12,22 @@ import (
 )
 
 func main() {
-	supervisorClient, err := supervisor.NewClient(config.ServerURL)
-	if err != nil {
-		log.Fatalf("Error creating supervisor client: %v", err)
+	serverURLs := strings.Split(config.ServerURLs, ",")
+	supervisorClients := make(map[string]*supervisor.Client)
+
+	for _, url := range serverURLs {
+		auth := &supervisor.BasicAuth{
+			Username: config.SupervisorUsername,
+			Password: config.SupervisorPassword,
+		}
+
+		client, err := supervisor.NewClient(url, auth)
+		if err != nil {
+			log.Fatalf("Error creating supervisor client for %s: %v", url, err)
+		}
+		defer client.Close()
+		supervisorClients[url] = client
 	}
-	defer supervisorClient.Close()
 
 	bot, err := tgbotapi.NewBotAPI(config.TelegramBotToken)
 	if err != nil {
@@ -23,7 +35,9 @@ func main() {
 	}
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	handler := tgbot.NewHandler(bot, supervisorClient)
+	handler := tgbot.NewHandler(bot, supervisorClients)
+
+	handler.ShowAllProcesses(config.TelegramChatID)
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()

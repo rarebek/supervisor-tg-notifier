@@ -1,22 +1,67 @@
 package supervisor
 
 import (
+	"encoding/base64"
+	"fmt"
 	"log"
+	"net/http"
 
 	"github.com/kolo/xmlrpc"
 	"github.com/rarebek/supervisor-tg-notifier/pkg/models"
 )
 
-type Client struct {
-	xmlrpc *xmlrpc.Client
+// BasicAuth holds credentials
+type BasicAuth struct {
+	Username string
+	Password string
 }
 
-func NewClient(serverURL string) (*Client, error) {
-	client, err := xmlrpc.NewClient(serverURL, nil)
-	if err != nil {
-		return nil, err
+type Client struct {
+	xmlrpc *xmlrpc.Client
+	auth   *BasicAuth
+}
+
+// encodeBasicAuth creates Base64 encoded auth string
+func encodeBasicAuth(username, password string) string {
+	auth := fmt.Sprintf("%s:%s", username, password)
+	return base64.StdEncoding.EncodeToString([]byte(auth))
+}
+
+// NewClient creates supervisor client with basic auth
+func NewClient(serverURL string, auth *BasicAuth) (*Client, error) {
+	// Create custom transport
+	transport := &http.Transport{}
+
+	// Create custom RoundTripper to add auth header
+	authTransport := &authRoundTripper{
+		base: transport,
+		auth: auth,
 	}
-	return &Client{xmlrpc: client}, nil
+
+	// Create XML-RPC client with auth transport
+	client, err := xmlrpc.NewClient(serverURL, authTransport)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create XML-RPC client: %w", err)
+	}
+
+	return &Client{
+		xmlrpc: client,
+		auth:   auth,
+	}, nil
+}
+
+// authRoundTripper implements http.RoundTripper
+type authRoundTripper struct {
+	base http.RoundTripper
+	auth *BasicAuth
+}
+
+// RoundTrip adds auth header to requests
+func (t *authRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.auth != nil {
+		req.Header.Set("Authorization", "Basic "+encodeBasicAuth(t.auth.Username, t.auth.Password))
+	}
+	return t.base.RoundTrip(req)
 }
 
 func (c *Client) Close() {

@@ -8,7 +8,8 @@ import (
 )
 
 func EscapeMarkdownV2(input string) string {
-	specialChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
+	specialChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!", "|"}
+	input = strings.ReplaceAll(input, "\\", "\\\\")
 	for _, char := range specialChars {
 		input = strings.ReplaceAll(input, char, "\\"+char)
 	}
@@ -20,7 +21,8 @@ func FormatProcessList(processes []models.Process, page, totalPages int) string 
 	for _, process := range processes {
 		escapedName := EscapeMarkdownV2(process.Name)
 		escapedState := EscapeMarkdownV2(process.State)
-		message += fmt.Sprintf("*Name:* `%s`\n*Status:* `%s`\n\n", escapedName, escapedState)
+		escapedGroup := EscapeMarkdownV2(process.Group)
+		message += fmt.Sprintf("*Name:* `%s`\n*Status:* `%s`\n*Group:* `%s`\n\n", escapedName, escapedState, escapedGroup)
 	}
 	return message
 }
@@ -30,11 +32,13 @@ func FormatProcessDetails(process models.Process) string {
 	escapedState := EscapeMarkdownV2(process.State)
 	escapedDesc := EscapeMarkdownV2(process.Description)
 
-	return fmt.Sprintf("*Process Details*\n"+
+	return fmt.Sprintf("*Process Details*\n\n"+
 		"*Name:* `%s`\n"+
 		"*Status:* `%s`\n"+
 		"*Description:* `%s`",
-		escapedName, escapedState, escapedDesc)
+		escapedName,
+		escapedState,
+		escapedDesc)
 }
 
 func FormatProcessStatusChange(process models.Process) string {
