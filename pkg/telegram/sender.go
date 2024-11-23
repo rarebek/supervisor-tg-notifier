@@ -37,3 +37,13 @@ func SendToTelegramWithInlineKeyboard(bot *tgbotapi.BotAPI, chatID int64, messag
 	}
 	return err
 }
+
+func SendToTelegramWithReplyKeyboard(bot *tgbotapi.BotAPI, chatID int64, msg tgbotapi.MessageConfig) error {
+	_, err := bot.Send(msg)
+	if err != nil {
+		log.Printf("Error sending message with reply keyboard to Telegram: %v", err)
+	} else {
+		log.Printf("Message with reply keyboard sent to Telegram: %s", msg.Text)
+	}
+	return err
+}

@@ -17,6 +17,8 @@ import (
 	"github.com/rarebek/supervisor-tg-notifier/pkg/utils"
 )
 
+var processPath string
+
 type Handler struct {
 	bot                  *tgbotapi.BotAPI
 	supervisorClients    map[string]*supervisor.Client
@@ -181,49 +183,19 @@ func (h *Handler) handleMessage(message *tgbotapi.Message) {
 	chatID := message.Chat.ID
 
 	switch {
-	case strings.HasPrefix(text, "/view_"):
-		// Split keeping all parts
-		allParts := strings.Split(strings.TrimPrefix(text, "/view_"), "_")
-		if len(allParts) >= 2 {
-			// Last part is always the shortID
-			shortID := allParts[len(allParts)-1]
-			// Combine all parts except last one to get full process name
-			processName := strings.Join(allParts[:len(allParts)-1], "_")
-
-			// Find the full server URL from short ID
-			var serverURL string
-			for url := range h.supervisorClients {
-				if utils.GetShortServerId(url) == shortID {
-					serverURL = url
-					break
-				}
-			}
-
-			if serverURL != "" {
-				if client, ok := h.supervisorClients[serverURL]; ok {
-					processes, err := client.GetAllProcesses()
-					if err != nil {
-						log.Printf("Error getting process info: %v", err)
-						return
-					}
-
-					for _, process := range processes {
-						if process.Name == processName {
-							process.ServerURL = serverURL
-							message := telegram.FormatProcessDetails(process)
-							keyboard := telegram.BuildProcessControlKeyboard(process.Name, serverURL)
-							telegram.SendToTelegramWithInlineKeyboard(h.bot, chatID, message, keyboard)
-							return
-						}
-					}
-				}
-			}
-		}
+	case strings.HasPrefix(text, "View "):
+		processName := strings.TrimPrefix(text, "View ")
+		processName = strings.ReplaceAll(processName, "\\_", "_") // Unescape underscores
+		h.ShowProcessDetails(chatID, processName)
 
 	case text == "/start" || text == "/help":
 		h.ShowAllProcesses(chatID)
+
+	default:
+		telegram.SendToTelegram(h.bot, chatID, "Unknown command. Use /start or /help to see available commands.")
 	}
 }
+
 func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 	var foundProcesses []models.Process
 
@@ -235,14 +207,7 @@ func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 		}
 
 		for _, process := range processes {
-			// Get last part after underscore for comparison
-			parts := strings.Split(process.Name, "_")
-			normalizedName := parts[len(parts)-1]
-			// Compare with the last part of input process name
-			inputParts := strings.Split(processName, "_")
-			inputNormalized := inputParts[len(inputParts)-1]
-
-			if normalizedName == inputNormalized {
+			if process.Name == processName {
 				process.ServerURL = serverURL
 				foundProcesses = append(foundProcesses, process)
 			}
@@ -256,7 +221,6 @@ func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 	// If only one process found, show details directly
 	if len(foundProcesses) == 1 {
 		process := foundProcesses[0]
-		process.Name = strings.ReplaceAll(process.Name, "_", "")
 		message := telegram.FormatProcessDetails(process)
 		keyboard := telegram.BuildProcessControlKeyboard(process.Name, process.ServerURL)
 		telegram.SendToTelegramWithInlineKeyboard(h.bot, chatID, message, keyboard)
@@ -275,7 +239,7 @@ func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(
 				fmt.Sprintf("View on %s", serverName),
-				fmt.Sprintf("details_%s_%s", telegram.EscapeMarkdownV2(strings.ReplaceAll(process.Name, "_", "")), url.QueryEscape(process.ServerURL)),
+				fmt.Sprintf("details_%s_%s", telegram.EscapeMarkdownV2(process.Name), url.QueryEscape(process.ServerURL)),
 			),
 		))
 	}
@@ -283,39 +247,6 @@ func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 	telegram.SendToTelegramWithInlineKeyboard(h.bot, chatID, message.String(), tgbotapi.NewInlineKeyboardMarkup(keyboard...))
 }
 
-// func (h *Handler) ListProcesses(chatID int64, page int, specificClient *supervisor.Client) {
-// 	var processes []models.Process
-// 	var err error
-
-// 	if specificClient != nil {
-// 		processes, err = specificClient.GetAllProcesses()
-// 	} else {
-// 		for _, client := range h.supervisorClients {
-// 			clientProcesses, clientErr := client.GetAllProcesses()
-// 			if clientErr != nil {
-// 				log.Printf("Error getting processes: %v", clientErr)
-// 				continue
-// 			}
-// 			processes = append(processes, clientProcesses...)
-// 		}
-// 	}
-
-// 	if err != nil {
-// 		log.Printf("Error getting processes: %v", err)
-// 		return
-// 	}
-
-// 	totalPages := (len(processes) + config.ProcessesPerPage - 1) / config.ProcessesPerPage
-// 	keyboard := telegram.BuildPaginatedKeyboard(processes, page)
-// 	message := telegram.FormatProcessList(processes, page, totalPages)
-
-//		err = telegram.SendToTelegramWithInlineKeyboard(h.bot, chatID, message, keyboard)
-//		if err != nil {
-//			log.Printf("Error sending processes list to Telegram: %v", err)
-//		} else {
-//			log.Printf("Processes list sent to Telegram")
-//		}
-//	}
 func (h *Handler) StartProcess(chatID int64, processPath string) {
 	// Split group:process if present
 	parts := strings.Split(processPath, ":")
@@ -418,6 +349,8 @@ func (h *Handler) ShowAllProcesses(chatID int64) {
 	var summary strings.Builder
 	summary.WriteString("*Process Status Summary*\n\n")
 
+	var keyboard [][]tgbotapi.KeyboardButton
+
 	for clientID, client := range h.supervisorClients {
 		clientProcesses, err := client.GetAllProcesses()
 		if err != nil {
@@ -450,11 +383,6 @@ func (h *Handler) ShowAllProcesses(chatID int64) {
 			// Skip empty group name for ungrouped processes
 			if groupName != "" && len(groupProcesses) > 1 {
 				summary.WriteString(fmt.Sprintf("\n*Group: %s*\n", telegram.EscapeMarkdownV2(groupName)))
-				// Add group control buttons
-				summary.WriteString(fmt.Sprintf("\\[ [Start All](https://t.me/%s?start=g_start_%s_%s) | "+
-					"[Stop All](https://t.me/%s?start=g_stop_%s_%s) \\]\n",
-					h.bot.Self.UserName, url.QueryEscape(groupName), url.QueryEscape(utils.GetShortServerId(clientID)),
-					h.bot.Self.UserName, url.QueryEscape(groupName), url.QueryEscape(utils.GetShortServerId(clientID))))
 			}
 
 			// Group by status within each group
@@ -463,42 +391,17 @@ func (h *Handler) ShowAllProcesses(chatID int64) {
 				processByStatus[p.State] = append(processByStatus[p.State], p)
 			}
 
-			// Show RUNNING processes
-			if runningProcs, ok := processByStatus["RUNNING"]; ok {
-				summary.WriteString("\n*🟢 RUNNING Processes:*\n")
-				for _, process := range runningProcs {
-					escapedName := telegram.EscapeMarkdownV2(process.Name)
-					processPath := process.Name
-					if groupName != "" {
-						processPath = groupName + ":" + process.Name
-					}
-					command := fmt.Sprintf("/view\\_%s\\_%s",
-						telegram.EscapeMarkdownV2(processPath),
-						telegram.EscapeMarkdownV2(utils.GetShortServerId(clientID)))
-					summary.WriteString(fmt.Sprintf("• %s \\[ %s \\]\n",
-						escapedName,
-						command,
-					))
-				}
-			}
-
-			// Show other statuses
+			// Show processes by status
 			for status, processes := range processByStatus {
-				if status == "RUNNING" {
-					continue
-				}
-				summary.WriteString(fmt.Sprintf("\n*🔴 %s Processes:*\n", telegram.EscapeMarkdownV2(status)))
+				summary.WriteString(fmt.Sprintf("\n*%s Processes:*\n", telegram.EscapeMarkdownV2(status)))
 				for _, process := range processes {
 					escapedName := telegram.EscapeMarkdownV2(process.Name)
-					processPath := process.Name
 					if groupName != "" {
 						processPath = groupName + ":" + process.Name
 					}
-					summary.WriteString(fmt.Sprintf("• %s \\[ [View](https://t.me/%s?start=view_%s_%s) \\]\n",
-						escapedName,
-						h.bot.Self.UserName,
-						url.QueryEscape(processPath),
-						url.QueryEscape(utils.GetShortServerId(clientID)),
+					summary.WriteString(fmt.Sprintf("• %s\n", escapedName))
+					keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButton(fmt.Sprintf("View %s", escapedName)),
 					))
 				}
 			}
@@ -507,7 +410,12 @@ func (h *Handler) ShowAllProcesses(chatID int64) {
 	}
 
 	message := summary.String()
-	err := telegram.SendToTelegram(h.bot, chatID, message)
+	replyKeyboard := tgbotapi.NewReplyKeyboard(keyboard...)
+	msg := tgbotapi.NewMessage(chatID, message)
+	msg.ParseMode = "MarkdownV2"
+	msg.ReplyMarkup = replyKeyboard
+
+	err := telegram.SendToTelegramWithReplyKeyboard(h.bot, chatID, msg)
 	if err != nil {
 		log.Printf("Error sending all processes list to Telegram: %v", err)
 	}
