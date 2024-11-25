@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
+// Extract just the host and port from the URL
 func GetShortServerId(serverURL string) string {
-	// Extract just the host and port from the URL
 	parts := strings.Split(serverURL, "://")
 	if len(parts) > 1 {
 		hostPort := strings.Split(parts[1], "/")[0]

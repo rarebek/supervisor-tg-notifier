@@ -17,7 +17,6 @@ type PaginatedKeyboard struct {
 }
 
 func BuildProcessControlKeyboard(processName, serverURL string) tgbotapi.InlineKeyboardMarkup {
-	// Get short ID for server URL
 	shortID := utils.GetShortServerId(serverURL)
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -122,17 +121,16 @@ func ShowAllProcessKeyboard(processes []models.Process) tgbotapi.InlineKeyboardM
 	var keyboard [][]tgbotapi.InlineKeyboardButton
 
 	for _, process := range processes {
-		// Get short ID for server URL
 		shortID := utils.GetShortServerId(process.ServerURL)
 
 		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(
 				fmt.Sprintf("🚀 %s", EscapeMarkdownV2(process.Name)),
-				fmt.Sprintf("start_%s_%s", process.Name, shortID), // Add server shortID
+				fmt.Sprintf("start_%s_%s", process.Name, shortID),
 			),
 			tgbotapi.NewInlineKeyboardButtonData(
 				fmt.Sprintf("🛑 %s", EscapeMarkdownV2(process.Name)),
-				fmt.Sprintf("stop_%s_%s", process.Name, shortID), // Add server shortID
+				fmt.Sprintf("stop_%s_%s", process.Name, shortID),
 			),
 		))
 	}

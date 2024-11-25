@@ -37,7 +37,7 @@ func main() {
 
 	handler := tgbot.NewHandler(bot, supervisorClients)
 
-	handler.ShowAllProcesses(config.TelegramChatID)
+	// handler.ShowAllProcesses(config.TelegramChatID)
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
