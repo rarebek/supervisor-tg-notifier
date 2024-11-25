@@ -16,6 +16,10 @@ func EscapeMarkdownV2(input string) string {
 	return input
 }
 
+func BackSlashRemover(input string) string {
+	return strings.ReplaceAll(input, "\\", "")
+}
+
 func FormatProcessList(processes []models.Process, page, totalPages int) string {
 	message := fmt.Sprintf("*Processes List* \\(Page %d/%d\\)\n", page, totalPages)
 	for _, process := range processes {

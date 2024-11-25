@@ -143,14 +143,43 @@ func ShowAllProcessKeyboard(processes []models.Process) tgbotapi.InlineKeyboardM
 	return tgbotapi.NewInlineKeyboardMarkup(keyboard...)
 }
 
-func ChooseProcessesKeyboard(processes []models.Process) tgbotapi.InlineKeyboardMarkup {
+func ChooseProcessesKeyboard(processes []models.Process, preferences []string) tgbotapi.InlineKeyboardMarkup {
 	var keyboard [][]tgbotapi.InlineKeyboardButton
 
 	for _, process := range processes {
+		shortID := utils.GetShortServerId(process.ServerURL)
+		processName := process.Group + ":" + process.Name
+		preference := fmt.Sprintf("%s:%s", process.ServerURL, processName)
+		
+		// Check if this process is already selected
+		isSelected := false
+		for _, pref := range preferences {
+			if pref == preference {
+				isSelected = true
+				break
+			}
+		}
+
+		// Add checkmark to selected processes
+		displayName := processName
+		if isSelected {
+			displayName = "✅ " + displayName
+		} else {
+			displayName = "☐ " + displayName
+		}
+
 		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(process.Name, process.Name),
+			tgbotapi.NewInlineKeyboardButtonData(
+				fmt.Sprintf("%s (%s)", EscapeMarkdownV2(displayName), shortID),
+				fmt.Sprintf("choose_%s_%s", processName, shortID),
+			),
 		))
 	}
+
+	// Add Done button
+	keyboard = append(keyboard, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("✅ Done", "done_choosing"),
+	))
 
 	return tgbotapi.NewInlineKeyboardMarkup(keyboard...)
 }
