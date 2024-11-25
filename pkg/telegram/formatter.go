@@ -28,7 +28,7 @@ func FormatProcessList(processes []models.Process, page, totalPages int) string 
 }
 
 func FormatProcessDetails(process models.Process) string {
-	escapedName := EscapeMarkdownV2(process.Name)
+	escapedName := EscapeMarkdownV2(process.Group + ":" + process.Name)
 	escapedState := EscapeMarkdownV2(process.State)
 	escapedDesc := EscapeMarkdownV2(process.Description)
 
@@ -38,7 +38,8 @@ func FormatProcessDetails(process models.Process) string {
 		"*Description:* `%s`",
 		escapedName,
 		escapedState,
-		escapedDesc)
+		escapedDesc,
+	)
 }
 
 func FormatProcessStatusChange(process models.Process) string {

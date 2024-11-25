@@ -87,6 +87,11 @@ func (c *Client) GetAllProcesses() ([]models.Process, error) {
 			state = "Unknown"
 		}
 
+		group, ok := p["group"].(string)
+		if !ok {
+			group = "Unknown"
+		}
+
 		description, ok := p["description"].(string)
 		if !ok {
 			description = "No description available"
@@ -96,8 +101,10 @@ func (c *Client) GetAllProcesses() ([]models.Process, error) {
 			Name:        name,
 			State:       state,
 			Description: description,
+			Group:       group,
 		}
 	}
+
 	return processes, nil
 }
 
@@ -117,4 +124,39 @@ func (c *Client) StopProcess(processName string) error {
 		log.Printf("Error stopping process %s: %v", processName, err)
 	}
 	return err
+}
+
+func (c *Client) GetProcessInfo(processName string) (models.Process, error) {
+	var processRaw map[string]interface{}
+	err := c.xmlrpc.Call("supervisor.getProcessInfo", []interface{}{processName}, &processRaw)
+	if err != nil {
+		return models.Process{}, fmt.Errorf("failed to get process info: %w", err)
+	}
+
+	name, ok := processRaw["name"].(string)
+	if !ok {
+		name = "Unknown"
+	}
+
+	state, ok := processRaw["statename"].(string)
+	if !ok {
+		state = "Unknown"
+	}
+
+	group, ok := processRaw["group"].(string)
+	if !ok {
+		group = "Unknown"
+	}
+
+	description, ok := processRaw["description"].(string)
+	if !ok {
+		description = "No description available"
+	}
+
+	return models.Process{
+		Name:        name,
+		State:       state,
+		Description: description,
+		Group:       group,
+	}, nil
 }

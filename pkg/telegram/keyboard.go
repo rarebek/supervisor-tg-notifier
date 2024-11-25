@@ -5,7 +5,6 @@ import (
 	"net/url"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/k0kubun/pp"
 	"github.com/rarebek/supervisor-tg-notifier/pkg/config"
 	"github.com/rarebek/supervisor-tg-notifier/pkg/models"
 	"github.com/rarebek/supervisor-tg-notifier/pkg/utils"
@@ -20,7 +19,6 @@ type PaginatedKeyboard struct {
 func BuildProcessControlKeyboard(processName, serverURL string) tgbotapi.InlineKeyboardMarkup {
 	// Get short ID for server URL
 	shortID := utils.GetShortServerId(serverURL)
-	pp.Println("keyboard text is: ", "start_"+processName+"_"+shortID)
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(

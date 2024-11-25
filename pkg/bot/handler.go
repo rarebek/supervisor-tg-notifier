@@ -22,7 +22,7 @@ var processPath string
 type Handler struct {
 	bot                  *tgbotapi.BotAPI
 	supervisorClients    map[string]*supervisor.Client
-	userStoppedProcesses map[string]struct{}
+	userStoppedProcesses map[string]bool
 	previousStatus       map[string]string
 }
 
@@ -30,28 +30,23 @@ func NewHandler(bot *tgbotapi.BotAPI, supervisorClients map[string]*supervisor.C
 	return &Handler{
 		bot:                  bot,
 		supervisorClients:    supervisorClients,
-		userStoppedProcesses: make(map[string]struct{}),
+		userStoppedProcesses: make(map[string]bool),
 		previousStatus:       make(map[string]string),
 	}
 }
 
 func (h *Handler) HandleUpdates() {
-	// Set up update config with 60 second timeout
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
-	// Get update channel
 	updates := h.bot.GetUpdatesChan(u)
 
-	// Process updates in infinite loop
 	for update := range updates {
-		// Handle callback queries (button clicks)
 		if update.CallbackQuery != nil {
 			h.handleCallbackQuery(update.CallbackQuery)
 			continue
 		}
 
-		// Handle text messages
 		if update.Message == nil {
 			continue
 		}
@@ -69,12 +64,9 @@ func (h *Handler) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		trimmedData := strings.TrimPrefix(data, "details_")
 		parts := strings.Split(trimmedData, "_")
 		if len(parts) >= 2 {
-			// Last part is always the server ID
 			serverID := parts[len(parts)-1]
-			// All parts except last one form the process name
 			processName := strings.Join(parts[:len(parts)-1], "_")
 
-			// Find server URL from ID
 			serverURL, _ := url.QueryUnescape(serverID)
 			if client, ok := h.supervisorClients[serverURL]; ok {
 				processes, err := client.GetAllProcesses()
@@ -95,6 +87,7 @@ func (h *Handler) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 						if _, err := h.bot.Send(editMsg); err != nil {
 							log.Printf("Error updating message: %v", err)
 						}
+
 						break
 					}
 				}
@@ -102,15 +95,12 @@ func (h *Handler) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		}
 
 	case strings.HasPrefix(data, "start_"), strings.HasPrefix(data, "stop_"):
-		// Remove the prefix (start_ or stop_)
 		trimmedData := strings.TrimPrefix(data, strings.Split(data, "_")[0]+"_")
-		// Find the last underscore to split process name and server ID
 		lastUnderscoreIndex := strings.LastIndex(trimmedData, "_")
 		if lastUnderscoreIndex != -1 {
 			processName := trimmedData[:lastUnderscoreIndex]
 			shortID := trimmedData[lastUnderscoreIndex+1:]
 
-			// Find the full server URL from short ID
 			var serverURL string
 			for url := range h.supervisorClients {
 				if utils.GetShortServerId(url) == shortID {
@@ -118,60 +108,81 @@ func (h *Handler) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 					break
 				}
 			}
-			pp.Println("serverURL in control: ", serverURL)
 
 			if serverURL != "" {
 				if client, ok := h.supervisorClients[serverURL]; ok {
+					// Get process info to get the group name
+					processes, err := client.GetAllProcesses()
+					if err != nil {
+						telegram.SendToTelegram(h.bot, chatID, fmt.Sprintf("Error getting process info: `%s`", telegram.EscapeMarkdownV2(err.Error())))
+						return
+					}
+
+					// var fullProcessName string
+					pp.Println("before loop", processName)
+					for _, process := range processes {
+						if process.Name == processName {
+							pp.Println(process.Name)
+							pp.Println(processName)
+							// fullProcessName = process.Group + ":" + process.Name
+							break
+						}
+					}
+
+					if processName == "" {
+						telegram.SendToTelegram(h.bot, chatID, "Process not found")
+						return
+					}
+
 					switch {
 					case strings.HasPrefix(data, "start_"):
-						pp.Println(data)
 						if err := client.StartProcess(processName); err != nil {
 							telegram.SendToTelegram(h.bot, chatID, fmt.Sprintf("Error starting process: `%s`", telegram.EscapeMarkdownV2(err.Error())))
 							return
 						}
-						processes, _ := client.GetAllProcesses()
-						for _, process := range processes {
-							if process.Name == processName {
-								process.ServerURL = serverURL
-								message := telegram.FormatProcessDetails(process)
-								keyboard := telegram.BuildProcessControlKeyboard(process.Name, serverURL)
 
-								editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, message, keyboard)
-								editMsg.ParseMode = "MarkdownV2"
-								h.bot.Send(editMsg)
-								break
-							}
+						// Get detailed information about the specific process
+						processInfo, err := client.GetProcessInfo(processName)
+						if err != nil {
+							telegram.SendToTelegram(h.bot, chatID, fmt.Sprintf("Error retrieving process info: `%s`", telegram.EscapeMarkdownV2(err.Error())))
+							return
 						}
 
-					case strings.HasPrefix(data, "stop_"):
-						// Set user-stopped flag before stopping
-						processKey := serverURL + ":" + processName
-						h.userStoppedProcesses[processKey] = struct{}{}
+						processInfo.ServerURL = serverURL
+						message := telegram.FormatProcessDetails(processInfo)
+						keyboard := telegram.BuildProcessControlKeyboard(processName, serverURL)
 
+						editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, message, keyboard)
+						editMsg.ParseMode = "MarkdownV2"
+						h.bot.Send(editMsg)
+
+					case strings.HasPrefix(data, "stop_"):
 						if err := client.StopProcess(processName); err != nil {
 							telegram.SendToTelegram(h.bot, chatID, fmt.Sprintf("Error stopping process: `%s`", telegram.EscapeMarkdownV2(err.Error())))
 							return
 						}
-						// Get updated process details from only this server
-						processes, _ := client.GetAllProcesses()
-						for _, process := range processes {
-							if process.Name == processName {
-								process.ServerURL = serverURL
-								message := telegram.FormatProcessDetails(process)
-								keyboard := telegram.BuildProcessControlKeyboard(process.Name, serverURL)
-								editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, message, keyboard)
-								editMsg.ParseMode = "MarkdownV2"
-								h.bot.Send(editMsg)
-								break
-							}
+
+						// Instead of getting all processes, get the specific process info
+						processInfo, err := client.GetProcessInfo(processName)
+						if err != nil {
+							telegram.SendToTelegram(h.bot, chatID, fmt.Sprintf("Error retrieving process info: `%s`", telegram.EscapeMarkdownV2(err.Error())))
+							return
 						}
+
+						processInfo.ServerURL = serverURL
+						message := telegram.FormatProcessDetails(processInfo)
+						keyboard := telegram.BuildProcessControlKeyboard(processName, serverURL)
+
+						editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, message, keyboard)
+						editMsg.ParseMode = "MarkdownV2"
+						h.bot.Send(editMsg)
+						h.userStoppedProcesses[serverURL+":"+processInfo.Name] = true
 					}
 				}
 			}
 		}
 	}
 
-	// Always acknowledge the callback
 	callback := tgbotapi.NewCallback(query.ID, "")
 	if _, err := h.bot.Request(callback); err != nil {
 		log.Printf("Error acknowledging callback: %v", err)
@@ -185,7 +196,7 @@ func (h *Handler) handleMessage(message *tgbotapi.Message) {
 	switch {
 	case strings.HasPrefix(text, "View "):
 		processName := strings.TrimPrefix(text, "View ")
-		processName = strings.ReplaceAll(processName, "\\_", "_") // Unescape underscores
+		processName = strings.ReplaceAll(processName, "\\_", "_")
 		h.ShowProcessDetails(chatID, processName)
 
 	case text == "/start" || text == "/help":
@@ -199,6 +210,7 @@ func (h *Handler) handleMessage(message *tgbotapi.Message) {
 func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 	var foundProcesses []models.Process
 
+	pp.Println("passed process name to function: ", processName)
 	for serverURL, client := range h.supervisorClients {
 		processes, err := client.GetAllProcesses()
 		if err != nil {
@@ -207,7 +219,7 @@ func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 		}
 
 		for _, process := range processes {
-			if process.Name == processName {
+			if process.Group+":"+process.Name == processName {
 				process.ServerURL = serverURL
 				foundProcesses = append(foundProcesses, process)
 			}
@@ -218,7 +230,6 @@ func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 		return
 	}
 
-	// If only one process found, show details directly
 	if len(foundProcesses) == 1 {
 		process := foundProcesses[0]
 		message := telegram.FormatProcessDetails(process)
@@ -227,7 +238,6 @@ func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 		return
 	}
 
-	// If multiple processes found, show selection menu
 	var message strings.Builder
 	var keyboard [][]tgbotapi.InlineKeyboardButton
 	message.WriteString("*Multiple processes found with same name:*\n\n")
@@ -247,48 +257,45 @@ func (h *Handler) ShowProcessDetails(chatID int64, processName string) {
 	telegram.SendToTelegramWithInlineKeyboard(h.bot, chatID, message.String(), tgbotapi.NewInlineKeyboardMarkup(keyboard...))
 }
 
-func (h *Handler) StartProcess(chatID int64, processPath string) {
-	// Split group:process if present
-	parts := strings.Split(processPath, ":")
-	processName := processPath
-	if len(parts) == 2 {
-		// Use group:process format for supervisor
-		processName = parts[0] + ":" + parts[1]
-	}
+// func (h *Handler) StartProcess(chatID int64, processPath string) {
+// 	parts := strings.Split(processPath, ":")
+// 	processName := processPath
+// 	if len(parts) == 2 {
+// 		processName = parts[0] + ":" + parts[1]
+// 	}
 
-	for _, client := range h.supervisorClients {
-		err := client.StartProcess(processName)
-		if err != nil {
-			log.Printf("Error starting process %s: %v", processName, err)
-			continue
-		}
-		err = telegram.SendStatusMessage(h.bot, chatID, processPath, "started")
-		if err != nil {
-			log.Printf("Error sending start process message to Telegram: %v", err)
-		}
-	}
-}
+// 	for _, client := range h.supervisorClients {
+// 		err := client.StartProcess(processName)
+// 		if err != nil {
+// 			log.Printf("Error starting process %s: %v", processName, err)
+// 			continue
+// 		}
+// 		err = telegram.SendStatusMessage(h.bot, chatID, processPath, "started")
+// 		if err != nil {
+// 			log.Printf("Error sending start process message to Telegram: %v", err)
+// 		}
+// 	}
+// }
 
-func (h *Handler) StopProcess(chatID int64, processPath string) {
-	// Split group:process if present
-	parts := strings.Split(processPath, ":")
-	processName := processPath
-	if len(parts) == 2 {
-		processName = parts[1] // Use just process name for actual stop
-	}
+// func (h *Handler) StopProcess(chatID int64, processPath string) {
+// 	parts := strings.Split(processPath, ":")
+// 	processName := processPath
+// 	if len(parts) == 2 {
+// 		processName = parts[1]
+// 	}
 
-	for _, client := range h.supervisorClients {
-		err := client.StopProcess(processName)
-		if err != nil {
-			log.Printf("Error stopping process %s: %v", processName, err)
-			continue
-		}
-		err = telegram.SendStatusMessage(h.bot, chatID, processPath, "stopped")
-		if err != nil {
-			log.Printf("Error sending stop process message to Telegram: %v", err)
-		}
-	}
-}
+// 	for _, client := range h.supervisorClients {
+// 		err := client.StopProcess(processName)
+// 		if err != nil {
+// 			log.Printf("Error stopping process %s: %v", processName, err)
+// 			continue
+// 		}
+// 		err = telegram.SendStatusMessage(h.bot, chatID, processPath, "stopped")
+// 		if err != nil {
+// 			log.Printf("Error sending stop process message to Telegram: %v", err)
+// 		}
+// 	}
+// }
 
 func (h *Handler) CheckProcessStatuses() {
 	for clientURL, client := range h.supervisorClients {
@@ -302,18 +309,15 @@ func (h *Handler) CheckProcessStatuses() {
 			logger.Log("debug", "Process", process.Name, "on", clientURL, ":", process.State)
 			processKey := clientURL + ":" + process.Name
 			prev, exists := h.previousStatus[processKey]
-
-			// Store initial status if not exists
 			if !exists {
 				h.previousStatus[processKey] = process.State
 				continue
 			}
 
-			// Check for status change from RUNNING to non-RUNNING
 			if prev == "RUNNING" && process.State != "RUNNING" {
-				// Check if it was stopped by user
-				if _, isUserStopped := h.userStoppedProcesses[processKey]; !isUserStopped {
-					// Only notify if not user-stopped
+				pp.Println("user stopped processes: ", h.userStoppedProcesses)
+				_, isUserStopped := h.userStoppedProcesses[processKey]
+				if !isUserStopped {
 					message := "*Processes Status:*\n"
 					message += fmt.Sprintf("*Server:* `%s`\n", telegram.EscapeMarkdownV2(clientURL))
 					message += telegram.FormatProcessStatusChange(process)
@@ -334,12 +338,10 @@ func (h *Handler) CheckProcessStatuses() {
 						log.Printf("Error sending notification to Telegram: %v", err)
 					}
 				} else {
-					// Clear user-stopped flag since status changed
 					delete(h.userStoppedProcesses, processKey)
 				}
 			}
 
-			// Update status for next check
 			h.previousStatus[processKey] = process.State
 		}
 	}
@@ -347,59 +349,66 @@ func (h *Handler) CheckProcessStatuses() {
 
 func (h *Handler) ShowAllProcesses(chatID int64) {
 	var summary strings.Builder
-	summary.WriteString("*Process Status Summary*\n\n")
-
 	var keyboard [][]tgbotapi.KeyboardButton
+
+	// Header
+	summary.WriteString("*📊 Process Status Summary*\n\n")
 
 	for clientID, client := range h.supervisorClients {
 		clientProcesses, err := client.GetAllProcesses()
 		if err != nil {
 			log.Printf("Error getting all processes from %s: %v", clientID, err)
-			message := fmt.Sprintf("Error fetching processes from %s: `%s`", clientID, telegram.EscapeMarkdownV2(err.Error()))
+			message := fmt.Sprintf("⚠️ Error fetching processes from %s: `%s`", clientID, telegram.EscapeMarkdownV2(err.Error()))
 			telegram.SendToTelegram(h.bot, chatID, message)
 			continue
 		}
 
-		// Set ServerURL for each process
+		// Set server URL for each process
 		for i := range clientProcesses {
 			clientProcesses[i].ServerURL = clientID
 		}
 
-		// Group by group name first
+		// Group processes
 		processByGroup := make(map[string][]models.Process)
 		for _, p := range clientProcesses {
 			if p.Group != "" {
 				processByGroup[p.Group] = append(processByGroup[p.Group], p)
 			} else {
-				// Handle ungrouped processes
 				processByGroup[""] = append(processByGroup[""], p)
 			}
 		}
 
-		summary.WriteString(fmt.Sprintf("*Client: %s*\n", telegram.EscapeMarkdownV2(clientID)))
+		// Server header with divider
+		summary.WriteString(fmt.Sprintf("🖥️ *Server: %s*\n", telegram.EscapeMarkdownV2(clientID)))
+		summary.WriteString("━━━━━━━━━━━━━━━━━━━━━\n")
 
 		// Process each group
 		for groupName, groupProcesses := range processByGroup {
-			// Skip empty group name for ungrouped processes
-			if groupName != "" && len(groupProcesses) > 1 {
-				summary.WriteString(fmt.Sprintf("\n*Group: %s*\n", telegram.EscapeMarkdownV2(groupName)))
+			if groupName != "" {
+				summary.WriteString(fmt.Sprintf("\n📦 *Group: %s*\n", telegram.EscapeMarkdownV2(groupName)))
 			}
 
-			// Group by status within each group
+			// Organize by status
 			processByStatus := make(map[string][]models.Process)
 			for _, p := range groupProcesses {
 				processByStatus[p.State] = append(processByStatus[p.State], p)
 			}
 
-			// Show processes by status
+			// Show processes by status with status icons
 			for status, processes := range processByStatus {
-				summary.WriteString(fmt.Sprintf("\n*%s Processes:*\n", telegram.EscapeMarkdownV2(status)))
+				statusIcon := getStatusIcon(status)
+				summary.WriteString(fmt.Sprintf("\n%s *%s*\n", statusIcon, telegram.EscapeMarkdownV2(status)))
+
 				for _, process := range processes {
-					escapedName := telegram.EscapeMarkdownV2(process.Name)
+					fullProcessName := process.Name
 					if groupName != "" {
-						processPath = groupName + ":" + process.Name
+						fullProcessName = groupName + ":" + process.Name
 					}
-					summary.WriteString(fmt.Sprintf("• %s\n", escapedName))
+
+					escapedName := telegram.EscapeMarkdownV2(fullProcessName)
+					summary.WriteString(fmt.Sprintf("  • %s\n", escapedName))
+
+					// Add keyboard button
 					keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
 						tgbotapi.NewKeyboardButton(fmt.Sprintf("View %s", escapedName)),
 					))
@@ -407,7 +416,13 @@ func (h *Handler) ShowAllProcesses(chatID int64) {
 			}
 			summary.WriteString("\n")
 		}
+		summary.WriteString("\n") // Add extra spacing between servers
 	}
+
+	// Add help text at the bottom
+	summary.WriteString("\n💡 *Tips:*\n")
+	summary.WriteString("• Click on process name to view details\n")
+	summary.WriteString("• Use /help to see all commands\n")
 
 	message := summary.String()
 	replyKeyboard := tgbotapi.NewReplyKeyboard(keyboard...)
@@ -418,6 +433,24 @@ func (h *Handler) ShowAllProcesses(chatID int64) {
 	err := telegram.SendToTelegramWithReplyKeyboard(h.bot, chatID, msg)
 	if err != nil {
 		log.Printf("Error sending all processes list to Telegram: %v", err)
+	}
+}
+
+// Helper function to get status icons
+func getStatusIcon(status string) string {
+	switch status {
+	case "RUNNING":
+		return "🟢"
+	case "STOPPED":
+		return "🔴"
+	case "STARTING":
+		return "🟡"
+	case "STOPPING":
+		return "🟠"
+	case "FATAL":
+		return "⚠️"
+	default:
+		return "❓"
 	}
 }
 
